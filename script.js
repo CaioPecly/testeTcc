@@ -1,111 +1,131 @@
 const $startGameButton = document.querySelector(".start-quiz");
-const $nextQuestionButton = document.querySelector(".next-question");
 const $questionsContainer = document.querySelector(".questions-container");
-const $questionText = document.querySelector(".question");
-const $answersContainer = document.querySelector(".answers-container");
 
-let currentQuestionIndex = 0;
 let totalCorrect = 0;
-let questions = [];
+let allQuestions = [];       // Todas as perguntas do banco
+let displayedQuestions = []; // Perguntas ativas na tela
+let usedQuestions = new Set();
 
-// Função para carregar as perguntas do servidor
 async function loadQuestions() {
   try {
     const response = await fetch('/api/questions');
     const data = await response.json();
-    questions = data.map(question => ({
-      question: question.question,
+    allQuestions = data.map(q => ({
+      question: q.question,
       answers: [
-        { text: question.answer1, correct: question.correct_answer === 1 },
-        { text: question.answer2, correct: question.correct_answer === 2 },
-        { text: question.answer3, correct: question.correct_answer === 3 },
-        { text: question.answer4, correct: question.correct_answer === 4 }
+        { text: q.answer1, correct: q.correct_answer === 1 },
+        { text: q.answer2, correct: q.correct_answer === 2 },
+        { text: q.answer3, correct: q.correct_answer === 3 },
+        { text: q.answer4, correct: q.correct_answer === 4 }
       ]
     }));
-    displayNextQuestion();
+
+    displayedQuestions = getRandomQuestions(6);
+    renderQuestions();
   } catch (error) {
     console.error('Erro ao carregar as perguntas:', error);
   }
 }
 
 $startGameButton.addEventListener("click", startGame);
-$nextQuestionButton.addEventListener("click", displayNextQuestion);
 
 function startGame() {
   $startGameButton.classList.add("hide");
   $questionsContainer.classList.remove("hide");
-  loadQuestions(); // Carrega as perguntas do servidor
+  loadQuestions();
 }
 
-function displayNextQuestion() {
-  resetState();
+function getRandomQuestions(count) {
+  const available = allQuestions.filter((_, i) => !usedQuestions.has(i));
+  const shuffled = available.sort(() => 0.5 - Math.random());
+  const selected = shuffled.slice(0, count);
 
-  if (questions.length === currentQuestionIndex) {
-    return finishGame();
-  }
-
-  const question = questions[currentQuestionIndex];
-  $questionText.textContent = question.question;
-  question.answers.forEach(answer => {
-    const newAnswer = document.createElement("button");
-    newAnswer.classList.add("button", "answer");
-    newAnswer.textContent = answer.text;
-    if (answer.correct) {
-      newAnswer.dataset.correct = answer.correct;
-    }
-    $answersContainer.appendChild(newAnswer);
-
-    newAnswer.addEventListener("click", selectAnswer);
+  selected.forEach(q => {
+    const index = allQuestions.indexOf(q);
+    usedQuestions.add(index);
   });
+
+  return selected;
 }
 
-function resetState() {
-  while ($answersContainer.firstChild) {
-    $answersContainer.removeChild($answersContainer.firstChild);
-  }
+function renderQuestions() {
+  $questionsContainer.innerHTML = "";
 
-  document.body.removeAttribute("class");
-  $nextQuestionButton.classList.add("hide");
+  displayedQuestions.forEach((q, index) => {
+    const questionCard = document.createElement("div");
+    questionCard.classList.add("question-card");
+    questionCard.dataset.index = index;
+
+    const questionText = document.createElement("p");
+    questionText.classList.add("question-text");
+    questionText.textContent = `${index + 1}. ${q.question}`;
+    questionCard.appendChild(questionText);
+
+    q.answers.forEach(answer => {
+      const answerButton = document.createElement("button");
+      answerButton.classList.add("button", "answer");
+      answerButton.textContent = answer.text;
+      answerButton.dataset.correct = answer.correct;
+
+      answerButton.addEventListener("click", (e) =>
+        selectAnswer(e, questionCard, index)
+      );
+
+      questionCard.appendChild(answerButton);
+    });
+
+    $questionsContainer.appendChild(questionCard);
+  });
+
+  const finishBtn = document.createElement("button");
+  finishBtn.textContent = "Finalizar Quiz";
+  finishBtn.classList.add("button", "finish-button");
+  finishBtn.addEventListener("click", finishGame);
+  $questionsContainer.appendChild(finishBtn);
 }
 
-function selectAnswer(event) {
-  const answerClicked = event.target;
+function selectAnswer(event, card, cardIndex) {
+  const selected = event.target;
+  const isCorrect = selected.dataset.correct === "true";
 
-  if (answerClicked.dataset.correct) {
-    document.body.classList.add("correct");
+  const answerButtons = card.querySelectorAll(".answer");
+  answerButtons.forEach(btn => {
+    btn.disabled = true;
+    if (btn.dataset.correct === "true") btn.classList.add("correct");
+    else btn.classList.add("incorrect");
+  });
+
+  if (isCorrect) {
     totalCorrect++;
   } else {
-    document.body.classList.add("incorrect");
+    // Substituir a pergunta
+    const newQuestion = getRandomQuestions(1)[0];
+    if (newQuestion) {
+      displayedQuestions[cardIndex] = newQuestion;
+    } else {
+      displayedQuestions.splice(cardIndex, 1); // Nenhuma sobrando
+    }
   }
 
-  document.querySelectorAll(".answer").forEach(button => {
-    button.disabled = true;
-
-    if (button.dataset.correct) {
-      button.classList.add("correct");
-    } else {
-      button.classList.add("incorrect");
-    }
-  });
-
-  $nextQuestionButton.classList.remove("hide");
-  currentQuestionIndex++;
+  // Espera um momento e atualiza a UI
+  setTimeout(() => {
+    renderQuestions();
+  }, 800);
 }
 
 function finishGame() {
-  const totalQuestions = questions.length;
-  const performance = Math.floor(totalCorrect * 100 / totalQuestions);
+  const totalQuestions = totalCorrect + (6 - displayedQuestions.length);
+  const performance = Math.floor((totalCorrect / totalQuestions) * 100);
 
   let message = "";
-
   switch (true) {
-    case (performance >= 90):
+    case performance >= 90:
       message = "Excelente :)";
       break;
-    case (performance >= 70):
+    case performance >= 70:
       message = "Muito bom :)";
       break;
-    case (performance >= 50):
+    case performance >= 50:
       message = "Bom";
       break;
     default:
@@ -114,14 +134,9 @@ function finishGame() {
 
   $questionsContainer.innerHTML = `
     <p class="final-message">
-      Você acertou ${totalCorrect} de ${totalQuestions} questões!
+      Você acertou ${totalCorrect} de ${totalQuestions} questões!<br/>
       <span>Resultado: ${message}</span>
     </p>
-    <button 
-      onclick=window.location.reload() 
-      class="button"
-    >
-      Refazer teste
-    </button>
+    <button onclick="window.location.reload()" class="button">Refazer teste</button>
   `;
 }
